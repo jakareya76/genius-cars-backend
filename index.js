@@ -8,14 +8,14 @@ require("dotenv").config();
 const app = express();
 const port = process.env.PORT || 5000;
 
+app.use(cookieParser());
+app.use(express.json());
 app.use(
   cors({
     origin: ["http://localhost:5173"],
     credentials: true,
   })
 );
-app.use(express.json());
-app.use(cookieParser());
 
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASSWORD}@cluster0.acgexdn.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
 
@@ -27,6 +27,23 @@ const client = new MongoClient(uri, {
     deprecationErrors: true,
   },
 });
+
+const verifyToken = async (req, res, next) => {
+  const token = req?.cookies?.token;
+
+  if (!token) {
+    return res.status(401).send({ message: "not authorized" });
+  }
+
+  jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, decoded) => {
+    if (err) {
+      return res.status(401).send({ message: "unauthorized access" });
+    }
+
+    req.user = decoded;
+    next();
+  });
+};
 
 async function run() {
   try {
@@ -40,19 +57,25 @@ async function run() {
     app.post("/jwt", async (req, res) => {
       const user = req.body;
 
-      console.log(user);
-
       const token = jwt.sign(user, process.env.ACCESS_TOKEN_SECRET, {
-        expiresIn: "10h",
+        expiresIn: "1h",
       });
 
       res
         .cookie("token", token, {
           httpOnly: true,
-          secure: false,
+          secure: true,
           sameSite: "none",
         })
         .send({ success: true });
+    });
+
+    app.post("/logout", async (req, res) => {
+      const user = req.body;
+
+      console.log("logout user", user);
+
+      res.clearCookie("token", { maxAge: 0 }).send({ success: true });
     });
 
     // cars related
@@ -77,7 +100,13 @@ async function run() {
       res.send(result);
     });
 
-    app.get("/booking", async (req, res) => {
+    app.get("/booking", verifyToken, async (req, res) => {
+      console.log(req.user);
+
+      if (req.user.email !== req.query.email) {
+        return res.status(403).send({ message: "forbidden access" });
+      }
+
       let query = {};
 
       if (req.query?.email) {
