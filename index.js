@@ -12,7 +12,11 @@ app.use(cookieParser());
 app.use(express.json());
 app.use(
   cors({
-    origin: ["http://localhost:5173"],
+    origin: [
+      "http://localhost:5173",
+      "https://genius-cars-1c8ed.web.app",
+      "https://genius-cars-1c8ed.firebaseapp.com",
+    ],
     credentials: true,
   })
 );
@@ -45,44 +49,29 @@ const verifyToken = async (req, res, next) => {
   });
 };
 
+const cookieOptions = {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === "production" ? true : false,
+  sameSite: process.env.NODE_ENV === "production" ? "none" : "strict",
+};
+
 async function run() {
   try {
-    // Connect the client to the server	(optional starting in v4.7)
     await client.connect();
 
     const serviceCollection = client.db("cars").collection("services");
     const bookingCollection = client.db("cars").collection("bookings");
 
-    // auth related api
-    app.post("/jwt", async (req, res) => {
-      const user = req.body;
-
-      const token = jwt.sign(user, process.env.ACCESS_TOKEN_SECRET, {
-        expiresIn: "1h",
-      });
-
-      res
-        .cookie("token", token, {
-          httpOnly: true,
-          secure: true,
-          sameSite: "none",
-        })
-        .send({ success: true });
-    });
-
-    app.post("/logout", async (req, res) => {
-      const user = req.body;
-
-      console.log("logout user", user);
-
-      res.clearCookie("token", { maxAge: 0 }).send({ success: true });
-    });
-
     // cars related
     app.get("/services", async (req, res) => {
-      const cursur = serviceCollection.find();
-      const result = await cursur.toArray();
-      res.send(result);
+      try {
+        const cursor = serviceCollection.find();
+        const result = await cursor.toArray();
+        res.json(result);
+      } catch (error) {
+        console.error("Error retrieving services:", error);
+        res.status(500).send("Internal Server Error");
+      }
     });
 
     app.get("/service/:id", async (req, res) => {
@@ -101,8 +90,6 @@ async function run() {
     });
 
     app.get("/booking", verifyToken, async (req, res) => {
-      console.log(req.user);
-
       if (req.user.email !== req.query.email) {
         return res.status(403).send({ message: "forbidden access" });
       }
@@ -124,11 +111,30 @@ async function run() {
       res.send(result);
     });
 
+    // auth related api
+    app.post("/jwt", async (req, res) => {
+      const user = req.body;
+
+      const token = jwt.sign(user, process.env.ACCESS_TOKEN_SECRET, {
+        expiresIn: "1h",
+      });
+
+      res.cookie("token", token, cookieOptions).send({ success: true });
+    });
+
+    app.post("/logout", async (req, res) => {
+      // const user = req.body;
+
+      res
+        .clearCookie("token", { ...cookieOptions, maxAge: 0 })
+        .send({ success: true });
+    });
+
     // Send a ping to confirm a successful connection
-    await client.db("admin").command({ ping: 1 });
-    console.log(
-      "Pinged your deployment. You successfully connected to MongoDB!"
-    );
+    // await client.db("admin").command({ ping: 1 });
+    // console.log(
+    //   "Pinged your deployment. You successfully connected to MongoDB!"
+    // );
   } finally {
     // Ensures that the client will close when you finish/error
     // await client.close();
